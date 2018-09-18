@@ -9,36 +9,54 @@ import android.view.Menu;
 import android.view.MenuInflater;
 import android.view.MenuItem;
 import android.webkit.JavascriptInterface;
+import android.webkit.ValueCallback;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.Toast;
 
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.io.ObjectInputStream;
+import java.io.ObjectOutputStream;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Random;
+import java.util.Set;
 
 public class MainActivity extends Activity {
 	/**
 	 * Request code for the settings activity.
 	 */
 	private static final int SETTINGS_ACTIVITY = 0x01;
+
 	/**
 	 * Pseudo-random number generator.
 	 */
 	private static final Random PRNG = new Random();
+
+	/**
+	 * Name of the file used to store ids.
+	 */
+	private static final String IDS_FILE_NAME = "ids.bin";
+
 	/**
 	 * Web browser view component.
 	 */
 	private WebView browser = null;
+
 	/**
 	 * Moment in time to wake up if there is a blocking.
 	 */
 	private long wakeupAt = System.currentTimeMillis() + 10000;
+
 	/**
 	 * Is running flag.
 	 */
 	private boolean running = false;
+
 	/**
 	 * Track bot states.
 	 */
@@ -55,6 +73,11 @@ public class MainActivity extends Activity {
 	private String password = "";
 
 	/**
+	 * Reporitng email.
+	 */
+	private String email = "";
+
+	/**
 	 * Title of the message which will be sent.
 	 */
 	private String title = "";
@@ -64,23 +87,35 @@ public class MainActivity extends Activity {
 	 */
 	private String message = "";
 
-
 	/**
 	 * Time out after message send.
 	 */
 	private int timeout = -1;
+
 	/**
 	 * Time out for wake-up after blocking.
 	 */
 	private int wakeup = -1;
+
 	/**
 	 * Message send flag.
 	 */
 	private boolean messageSend = false;
+
 	/**
 	 * Friendship send flag.
 	 */
 	private boolean friendshipSend = false;
+
+	/**
+	 * Id of the user to which to write a message.
+	 */
+	private int userid = -1;
+
+	/**
+	 * Set of ids found.
+	 */
+	private Set<Integer> ids = new HashSet<Integer>();
 
 	/**
 	 * Show test point toast.
@@ -107,6 +142,7 @@ public class MainActivity extends Activity {
 	private void initialize() {
 		username = getSharedPreferences(MainActivity.class.getName(), MODE_PRIVATE).getString("username", "");
 		password = getSharedPreferences(MainActivity.class.getName(), MODE_PRIVATE).getString("password", "");
+		email = getSharedPreferences(MainActivity.class.getName(), MODE_PRIVATE).getString("email", "");
 		title = getSharedPreferences(MainActivity.class.getName(), MODE_PRIVATE).getString("title", "");
 		message = getSharedPreferences(MainActivity.class.getName(), MODE_PRIVATE).getString("message", "");
 		timeout = getSharedPreferences(MainActivity.class.getName(), MODE_PRIVATE).getInt("timeout", 5000);
@@ -162,6 +198,15 @@ public class MainActivity extends Activity {
 		super.onCreate(savedInstanceState);
 		setContentView(R.layout.activity_main);
 
+		/* Load ids found in previous sessions. */
+		try {
+			ObjectInputStream in = new ObjectInputStream(new FileInputStream(getFilesDir() + IDS_FILE_NAME));
+			ids = (HashSet<Integer>) in.readObject();
+			in.close();
+		} catch (IOException e) {
+		} catch (ClassNotFoundException e) {
+		}
+
 		initialize();
 
 		/*
@@ -197,8 +242,8 @@ public class MainActivity extends Activity {
 							debug(12);
 							state = WebPageState.LOGGED_IN;
 
-							loadUrl("javascript:{var uselessvar = document.getElementById('username').value = '"+username+"';}");
-							loadUrl("javascript:{var uselessvar = document.getElementById('pass').value = '"+username+"';}");
+							loadUrl("javascript:{var uselessvar = document.getElementById('username').value = '" + username + "';}");
+							loadUrl("javascript:{var uselessvar = document.getElementById('pass').value = '" + username + "';}");
 							loadUrl(
 											"javascript:{var uselessvar = document.getElementById('login').click();}", timeout);
 
@@ -212,27 +257,66 @@ public class MainActivity extends Activity {
 							debug(14);
 							state = WebPageState.SEARCH_DONE;
 
+							/* Keep list of the ids. */
+							try {
+								ObjectOutputStream out = new ObjectOutputStream(new FileOutputStream(getFilesDir() + IDS_FILE_NAME));
+								out.writeObject(ids);
+								out.close();
+							} catch (IOException e) {
+							}
+
 							loadUrl(
 											"javascript:{var uselessvar = (document.getElementsByName('btnSearch')[0]).click();}", timeout);
 						} else if (state == WebPageState.SEARCH_DONE) {
 							debug(15);
-							state = WebPageState.PROFILE_SELECTED;
-							loadUrl("https://www.salsa.bg/index.php?page=newMessage&userid=120383", timeout);
+
+							/* Handling of the HTML text to find information written inside the webpage. */
+							browser.evaluateJavascript(
+											"(function() { return ('<html>'+document.getElementsByTagName('html')[0].innerHTML+'</html>'); })();",
+											new ValueCallback<String>() {
+												@Override
+												public void onReceiveValue(String html) {
+													userid = -1;
+													int index = 0;
+													while ((index = html.indexOf("newMessage&userid=", index)) != -1) {
+														int end = html.indexOf("\"", index);
+														int id = Integer.parseInt(html.substring(index, end));
+
+														print("" + id);
+														/* Check is the ide used. */
+														if (ids.contains(id) == false) {
+															userid = id;
+															break;
+														}
+
+														index++;
+													}
+												}
+											});
+
+							if (userid == -1) {
+								state = WebPageState.BEFORE_SEARCH;
+								loadUrl("https://www.salsa.bg/index.php?page=searchb", timeout);
+							} else {
+								state = WebPageState.PROFILE_SELECTED;
+								ids.add(userid);
+								loadUrl("https://www.salsa.bg/index.php?page=newMessage&userid=" + userid, timeout);
+								userid = -1;
+							}
 						} else if (state == WebPageState.PROFILE_SELECTED) {
 							debug(16);
 							state = WebPageState.MESSAGE_SENT;
 
 							if (messageSend == true) {
 								loadUrl(
-												"javascript:{var uselessvar = (document.getElementsByName('msgTopic')[0]).value = '"+title+"';}");
+												"javascript:{var uselessvar = (document.getElementsByName('msgTopic')[0]).value = '" + title + "';}");
 								loadUrl(
-												"javascript:{var uselessvar = document.getElementsByName('msgMessage')[0].value = '"+message+"';}");
+												"javascript:{var uselessvar = document.getElementsByName('msgMessage')[0].value = '" + message + "';}");
 								loadUrl(
 												"javascript:{var uselessvar = (document.getElementsByName('sendMessage')[0]).click();}", timeout);
 							}
 							if (friendshipSend == true) {
 							}
-
 						} else if (state == WebPageState.MESSAGE_SENT) {
 							debug(17);
 							state = WebPageState.LOGGED_IN;
@@ -249,6 +333,7 @@ public class MainActivity extends Activity {
 			}
 		}, "HTMLViewer");
 
+		/* Handling page finished event. */
 		browser.setWebViewClient(new WebViewClient() {
 			public void onPageFinished(WebView view, String url) {
 				/*
@@ -313,11 +398,11 @@ public class MainActivity extends Activity {
 			case R.id.report:
 				Intent intent = new Intent(Intent.ACTION_SEND);
 				intent.setType("message/rfc822");
-				intent.putExtra(Intent.EXTRA_EMAIL, new String[]{"tol@abv.bg"});
+				intent.putExtra(Intent.EXTRA_EMAIL, new String[]{email});
 				intent.putExtra(Intent.EXTRA_SUBJECT, "Report - " + new java.util.Date() + " ...");
 				String message = "";
 				message += "visited: ";
-				List<Integer> list = new ArrayList<Integer>();
+				List<Integer> list = new ArrayList<Integer>(ids);
 				Collections.sort(list);
 				message += list.toString();
 				message += "\n";
@@ -339,6 +424,13 @@ public class MainActivity extends Activity {
 		return true;
 	}
 
+	@Override
+	protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+		if (requestCode == SETTINGS_ACTIVITY) {
+			initialize();
+		}
+	}
+
 	/**
 	 * Web pages states.
 	 */
@@ -346,18 +438,11 @@ public class MainActivity extends Activity {
 		LOGGED_OUT, LOGGED_IN, BEFORE_SEARCH, SEARCH_DONE, MESSAGE_BOX, PROFILE_SELECTED, MESSAGE_SENT,
 	}
 
+
 	/**
 	 * User profile gender set.
 	 */
 	private enum UserGender {
 		NONE, MALE, FEMALE
-	}
-
-
-	@Override
-	protected void onActivityResult(int requestCode, int resultCode, Intent data) {
-		if (requestCode == SETTINGS_ACTIVITY) {
-			initialize();
-		}
 	}
 }

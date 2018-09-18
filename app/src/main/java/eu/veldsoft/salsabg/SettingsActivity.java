@@ -30,6 +30,7 @@ public class SettingsActivity extends Activity {
 
 		((EditText) findViewById(R.id.username)).setText("" + getSharedPreferences(MainActivity.class.getName(), MODE_PRIVATE).getString("username", ""));
 		((EditText) findViewById(R.id.password)).setText("" + getSharedPreferences(MainActivity.class.getName(), MODE_PRIVATE).getString("password", ""));
+		((EditText) findViewById(R.id.email)).setText("" + getSharedPreferences(MainActivity.class.getName(), MODE_PRIVATE).getString("email", ""));
 		((EditText) findViewById(R.id.title)).setText("" + getSharedPreferences(MainActivity.class.getName(), MODE_PRIVATE).getString("title", ""));
 		((EditText) findViewById(R.id.message)).setText("" + getSharedPreferences(MainActivity.class.getName(), MODE_PRIVATE).getString("message", ""));
 		((EditText) findViewById(R.id.timeout)).setText("" + getSharedPreferences(MainActivity.class.getName(), MODE_PRIVATE).getInt("timeout", 0));
@@ -54,6 +55,7 @@ public class SettingsActivity extends Activity {
 
 		editor.putString("username", ((EditText) findViewById(R.id.username)).getText().toString());
 		editor.putString("password", ((EditText) findViewById(R.id.password)).getText().toString());
+		editor.putString("email", ((EditText) findViewById(R.id.email)).getText().toString());
 		editor.putString("title", ((EditText) findViewById(R.id.title)).getText().toString());
 		editor.putString("message", ((EditText) findViewById(R.id.message)).getText().toString());
 		editor.putInt("timeout", Integer.valueOf(((EditText) findViewById(R.id.timeout)).getText().toString()));
