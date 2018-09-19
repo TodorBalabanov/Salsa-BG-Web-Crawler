@@ -5,6 +5,7 @@ import android.app.Activity;
 import android.content.Intent;
 import android.os.Bundle;
 import android.os.CountDownTimer;
+import android.util.Log;
 import android.view.Menu;
 import android.view.MenuInflater;
 import android.view.MenuItem;
@@ -272,17 +273,19 @@ public class MainActivity extends Activity {
 
 							/* Handling of the HTML text to find information written inside the webpage. */
 							browser.evaluateJavascript(
-											"(function() { return ('<html>'+document.getElementsByTagName('html')[0].innerHTML+'</html>'); })();",
+//											"(function(){return('<html>'+document.getElementsByTagName('html')[0].innerHTML+'</html>');})();",
+											"(function(){return(document.getElementsByTagName('a'));})();",
+//											"(function(){var result = ''; var links = document.getElementsByTagName('a'); for(var i=0, max=links.length; i<max; i++) {result += links[i].href + ' ';} return('<html> '+result+' </html>');})();",
 											new ValueCallback<String>() {
 												@Override
 												public void onReceiveValue(String html) {
 													userid = -1;
 													int index = 0;
+													Log.i("LINKS ---> ", html);
 													while ((index = html.indexOf("newMessage&userid=", index)) != -1) {
 														int end = html.indexOf("\"", index);
 														int id = Integer.parseInt(html.substring(index, end));
 
-														print("" + id);
 														/* Check is the ide used. */
 														if (ids.contains(id) == false) {
 															userid = id;
