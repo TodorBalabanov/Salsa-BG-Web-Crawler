@@ -2,15 +2,15 @@ package eu.veldsoft.salsabg;
 
 import android.annotation.SuppressLint;
 import android.app.Activity;
+import android.content.Context;
 import android.content.Intent;
 import android.os.Bundle;
 import android.os.CountDownTimer;
-import android.util.Log;
+import android.os.PowerManager;
 import android.view.Menu;
 import android.view.MenuInflater;
 import android.view.MenuItem;
 import android.webkit.JavascriptInterface;
-import android.webkit.ValueCallback;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.Toast;
@@ -26,8 +26,11 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Random;
 import java.util.Set;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
 public class MainActivity extends Activity {
+
 	/**
 	 * Request code for the settings activity.
 	 */
@@ -119,13 +122,18 @@ public class MainActivity extends Activity {
 	private Set<Integer> ids = new HashSet<Integer>();
 
 	/**
+	 * Screen lcok.
+	 */
+	private PowerManager.WakeLock screenLock;
+
+	/**
 	 * Show test point toast.
 	 *
 	 * @param number Number of the test point.
 	 */
 	private void debug(int number) {
 		//TODO Control it with preferences.
-		Toast.makeText(MainActivity.this, "Test point " + number + " ...", Toast.LENGTH_SHORT).show();
+		//Toast.makeText(MainActivity.this, "Test point " + number + " ...", Toast.LENGTH_SHORT).show();
 	}
 
 	/**
@@ -210,9 +218,26 @@ public class MainActivity extends Activity {
 
 		initialize();
 
-		/*
-		 * Prepare web browser object.
-		 */
+		/* Get lock for the screen. */
+		screenLock = ((PowerManager) getSystemService(Context.POWER_SERVICE)).newWakeLock(PowerManager.SCREEN_DIM_WAKE_LOCK, "SalsaBG");
+		screenLock.acquire();
+
+		/* Check for wakeup event. */
+		wakeupAt = System.currentTimeMillis() + wakeup;
+		Executors.newSingleThreadScheduledExecutor().scheduleAtFixedRate
+						(new Runnable() {
+							public void run() {
+								if (running == false) {
+									return;
+								}
+
+								if (System.currentTimeMillis() > wakeupAt) {
+									loadUrl("https://wwww.salsa.bg/");
+								}
+							}
+						}, 0, timeout, TimeUnit.MILLISECONDS);
+
+		/* Prepare web browser object. */
 		browser = (WebView) findViewById(R.id.browser);
 		browser.getSettings()
 						.setUserAgentString("Mozilla/5.0 (X11; U; Linux i686; en-US;rv:1.9.0.4) Gecko/20100101 Firefox/4.0");
@@ -225,6 +250,38 @@ public class MainActivity extends Activity {
 		browser.addJavascriptInterface(new Object() {
 			@JavascriptInterface
 			public void showHTML(final String html) {
+				wakeupAt = System.currentTimeMillis() + wakeup;
+
+				//TODO Do it in smarter way.
+//				do {
+//					userid = PRNG.nextInt(500000);
+//				} while (ids.contains(userid) == true);
+
+				userid = -1;
+				int index = 0;
+				while ((index = html.indexOf("newMessage&userid=", index)) != -1) {
+					int end = html.indexOf("\"", index);
+					int id = Integer.parseInt(html.substring(index, end));
+
+					/* Check is the ide used. */
+					if (ids.contains(id) == false) {
+						userid = id;
+						break;
+					}
+
+					index++;
+				}
+
+				if (state == WebPageState.BEFORE_SEARCH) {
+					/* Keep list of the ids. */
+					try {
+						ObjectOutputStream out = new ObjectOutputStream(new FileOutputStream(getFilesDir() + IDS_FILE_NAME));
+						out.writeObject(ids);
+						out.close();
+					} catch (IOException e) {
+					}
+				}
+
 				MainActivity.this.runOnUiThread(new Runnable() {
 					public void run() {
 						/*
@@ -234,8 +291,6 @@ public class MainActivity extends Activity {
 							return;
 						}
 
-						wakeupAt = System.currentTimeMillis() + wakeup;
-
 						/*
 						 * Set user name, password and login.
 						 */
@@ -243,12 +298,10 @@ public class MainActivity extends Activity {
 							debug(12);
 							state = WebPageState.LOGGED_IN;
 
-							loadUrl("javascript:{var uselessvar = document.getElementById('username').value = '" + username + "';}");
-							loadUrl("javascript:{var uselessvar = document.getElementById('pass').value = '" + username + "';}");
+							loadUrl("javascript:{var uselessvar = (document.getElementById('username')).value = '" + username + "';}");
+							loadUrl("javascript:{var uselessvar = (document.getElementById('pass')).value = '" + username + "';}");
 							loadUrl(
-											"javascript:{var uselessvar = document.getElementById('login').click();}", timeout);
-
-							loadUrl("https://wwww.salsa.bg/", timeout);
+											"javascript:{var uselessvar = (document.getElementById('login')).click();}", timeout);
 						} else if (state == WebPageState.LOGGED_IN) {
 							debug(13);
 							state = WebPageState.BEFORE_SEARCH;
@@ -258,44 +311,10 @@ public class MainActivity extends Activity {
 							debug(14);
 							state = WebPageState.SEARCH_DONE;
 
-							/* Keep list of the ids. */
-							try {
-								ObjectOutputStream out = new ObjectOutputStream(new FileOutputStream(getFilesDir() + IDS_FILE_NAME));
-								out.writeObject(ids);
-								out.close();
-							} catch (IOException e) {
-							}
-
 							loadUrl(
 											"javascript:{var uselessvar = (document.getElementsByName('btnSearch')[0]).click();}", timeout);
 						} else if (state == WebPageState.SEARCH_DONE) {
 							debug(15);
-
-							/* Handling of the HTML text to find information written inside the webpage. */
-							browser.evaluateJavascript(
-//											"(function(){return('<html>'+document.getElementsByTagName('html')[0].innerHTML+'</html>');})();",
-											"(function(){return(document.getElementsByTagName('a'));})();",
-//											"(function(){var result = ''; var links = document.getElementsByTagName('a'); for(var i=0, max=links.length; i<max; i++) {result += links[i].href + ' ';} return('<html> '+result+' </html>');})();",
-											new ValueCallback<String>() {
-												@Override
-												public void onReceiveValue(String html) {
-													userid = -1;
-													int index = 0;
-													Log.i("LINKS ---> ", html);
-													while ((index = html.indexOf("newMessage&userid=", index)) != -1) {
-														int end = html.indexOf("\"", index);
-														int id = Integer.parseInt(html.substring(index, end));
-
-														/* Check is the ide used. */
-														if (ids.contains(id) == false) {
-															userid = id;
-															break;
-														}
-
-														index++;
-													}
-												}
-											});
 
 							if (userid == -1) {
 								state = WebPageState.BEFORE_SEARCH;
@@ -311,6 +330,8 @@ public class MainActivity extends Activity {
 							state = WebPageState.MESSAGE_SENT;
 
 							if (messageSend == true) {
+								loadUrl(
+												"javascript:{var uselessvar = document.getElementById('saveToSent').checked = false;}");
 								loadUrl(
 												"javascript:{var uselessvar = (document.getElementsByName('msgTopic')[0]).value = '" + title + "';}");
 								loadUrl(
@@ -346,6 +367,15 @@ public class MainActivity extends Activity {
 								"javascript:HTMLViewer.showHTML('<html>'+document.getElementsByTagName('html')[0].innerHTML+'</html>');");
 			}
 		});
+	}
+
+	/**
+	 * {@inheritDoc}
+	 */
+	@Override
+	public void onDestroy() {
+		screenLock.release();
+		super.onDestroy();
 	}
 
 	/**
